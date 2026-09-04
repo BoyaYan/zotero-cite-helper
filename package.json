@@ -1,0 +1,74 @@
+{
+  "name": "zotero-cite-helper",
+  "displayName": "Zotero Cite Helper",
+  "description": "基于 Zotero Better BibTeX JSON-RPC 的引用工具：导出 BibLaTeX、引用并更新文献、更新 BibTeX 条目。",
+  "version": "0.0.1",
+  "publisher": "boyayan",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BoyaYan/zotero-cite-helper.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:zotero-cite-helper.exportBibLatex",
+    "onCommand:zotero-cite-helper.citeBibliography",
+    "onCommand:zotero-cite-helper.updateBibtexEntries"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "zotero-cite-helper.exportBibLatex",
+        "title": "Zotero Cite Helper: 导出 BibLaTeX"
+      },
+      {
+        "command": "zotero-cite-helper.citeBibliography",
+        "title": "Zotero Cite Helper: 引用并更新文献"
+      },
+      {
+        "command": "zotero-cite-helper.updateBibtexEntries",
+        "title": "Zotero Cite Helper: 更新 BibTeX 条目"
+      }
+    ],
+    "configuration": {
+      "title": "Zotero Cite Helper",
+      "properties": {
+        "zotero-cite-helper.endpoint": {
+          "type": "string",
+          "default": "http://localhost:23119/better-bibtex/json-rpc",
+          "description": "Zotero Better BibTeX JSON-RPC 接口地址"
+        },
+        "zotero-cite-helper.defaultBibName": {
+          "type": "string",
+          "default": "ref.bib",
+          "description": "导出引用文件的默认文件名"
+        },
+        "zotero-cite-helper.latexBibStyle": {
+          "type": "string",
+          "enum": ["bibtex", "biblatex"],
+          "default": "bibtex",
+          "description": "导出的 LaTeX 引用格式"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "axios": "^1.6.0"
+  }
+}
