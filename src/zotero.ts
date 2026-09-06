@@ -8,6 +8,7 @@ import axios from "axios";
 
 export interface ZoteroConfig {
   endpoint: string;
+  caywUrl: string;
   latexBibStyle: string;
   defaultBibName: string;
 }
@@ -16,6 +17,7 @@ export function getConfig(): ZoteroConfig {
   const cfg = vscode.workspace.getConfiguration("zotero-cite-helper");
   return {
     endpoint: cfg.get<string>("endpoint", "http://localhost:23119/better-bibtex/json-rpc"),
+    caywUrl: cfg.get<string>("caywUrl", "http://localhost:23119/better-bibtex/cayw"),
     latexBibStyle: cfg.get<string>("latexBibStyle", "bibtex"),
     defaultBibName: cfg.get<string>("defaultBibName", "ref.bib"),
   };
@@ -42,14 +44,46 @@ export async function postJsonRpc(method: string, params: unknown[]): Promise<un
 }
 
 /**
+ * 导出结果：BibTeX 文本 + 缺失（未找到）的引用键。
+ */
+export interface ExportResult {
+  bibtex: string;
+  missingKeys: string[];
+}
+
+/**
  * 导出指定引用键的 BibTeX 文本。
  * 使用两参数形式（不带 groupId），可跨所有分组文库导出。
+ * 当部分键在 Zotero 中找不到时，自动跳过这些键，并在 missingKeys 中报告。
  * @param keys 引用键数组
+ * @returns 导出结果，包含 BibTeX 文本和缺失的引用键
  */
-export async function exportBibtex(keys: string[]): Promise<string> {
+export async function exportBibtex(keys: string[]): Promise<ExportResult> {
   const { latexBibStyle } = getConfig();
-  const result = await postJsonRpc("item.export", [keys, latexBibStyle]);
-  return String(result || "");
+  const missingKeys: string[] = [];
+  try {
+    const result = await postJsonRpc("item.export", [keys, latexBibStyle]);
+    return { bibtex: String(result || ""), missingKeys };
+  } catch (error) {
+    // BBT 在部分键找不到时返回 "not found: key1, key2" 错误
+    const message = error instanceof Error ? error.message : String(error);
+    const notFoundMatch = message.match(/not found:\s*(.+)/i);
+    if (notFoundMatch) {
+      const notFoundKeys = notFoundMatch[1]
+        .split(",")
+        .map((k) => k.trim())
+        .filter(Boolean);
+      missingKeys.push(...notFoundKeys);
+      const foundKeys = keys.filter((k) => !notFoundKeys.includes(k));
+      if (foundKeys.length === 0) {
+        return { bibtex: "", missingKeys }; // 全部找不到，返回空
+      }
+      // 递归导出能找到的键，并合并缺失键
+      const rest = await exportBibtex(foundKeys);
+      return { bibtex: rest.bibtex, missingKeys: [...missingKeys, ...rest.missingKeys] };
+    }
+    throw error;
+  }
 }
 
 /**
@@ -65,4 +99,44 @@ export async function getBibtexFromZotero(citeKey: string): Promise<string | nul
     // 未找到或不可达的条目由调用方处理
     return null;
   }
+}
+
+/**
+ * 通过 CAYW (Cite As You Write) 接口弹出 Zotero 选择窗口。
+ * 用户在 Zotero 弹出的窗口中选择条目后，返回 @citeKey 格式的引用键。
+ * @returns 选中的引用键数组
+ */
+export async function pickCiteKeys(): Promise<string[]> {
+  const { caywUrl } = getConfig();
+
+  let response;
+  try {
+    // 参考原插件：使用 GET 请求，通过 params 传递参数
+    response = await axios.get(caywUrl, {
+      params: {
+        format: "pandoc",
+        brackets: "1",
+        minimize: "1",
+      },
+    });
+  } catch (error) {
+    throw new Error(
+      `无法连接 Zotero CAYW 接口（${caywUrl}）。请确认 Zotero 和 Better BibTeX 插件已启动。${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+
+  const citeKeys: string[] = [];
+  const pattern = /@([\w-:\d]+)/g;
+  const dataText = String(response.data ?? "");
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(dataText)) !== null) {
+    citeKeys.push(match[1]);
+  }
+
+  if (citeKeys.length === 0) {
+    throw new Error("未在 Zotero 中选择任何条目。");
+  }
+  return citeKeys;
 }

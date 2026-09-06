@@ -15,13 +15,15 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:zotero-cite-helper.exportBibLatex",
-    "onCommand:zotero-cite-helper.citeBibliography",
-    "onCommand:zotero-cite-helper.updateBibtexEntries"
+    "onStartupFinished"
   ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
+      {
+        "command": "zotero-cite-helper.showTaskPicker",
+        "title": "Zotero Cite Helper: 选择命令"
+      },
       {
         "command": "zotero-cite-helper.exportBibLatex",
         "title": "Zotero Cite Helper: 导出 BibLaTeX"
@@ -42,6 +44,11 @@
           "type": "string",
           "default": "http://localhost:23119/better-bibtex/json-rpc",
           "description": "Zotero Better BibTeX JSON-RPC 接口地址"
+        },
+        "zotero-cite-helper.caywUrl": {
+          "type": "string",
+          "default": "http://localhost:23119/better-bibtex/cayw",
+          "description": "Zotero CAYW (Cite As You Write) 接口地址，用于弹出选择窗口"
         },
         "zotero-cite-helper.defaultBibName": {
           "type": "string",
