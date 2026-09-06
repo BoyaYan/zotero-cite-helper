@@ -35,6 +35,8 @@ export async function postJsonRpc(method: string, params: unknown[]): Promise<un
     method,
     params,
     id: Date.now(),
+  }, {
+    timeout: 10000, // 10 秒超时，避免 Zotero 卡住时请求挂起
   });
   const data = response.data;
   if (data && data.error) {
@@ -61,29 +63,32 @@ export interface ExportResult {
 export async function exportBibtex(keys: string[]): Promise<ExportResult> {
   const { latexBibStyle } = getConfig();
   const missingKeys: string[] = [];
-  try {
-    const result = await postJsonRpc("item.export", [keys, latexBibStyle]);
-    return { bibtex: String(result || ""), missingKeys };
-  } catch (error) {
-    // BBT 在部分键找不到时返回 "not found: key1, key2" 错误
-    const message = error instanceof Error ? error.message : String(error);
-    const notFoundMatch = message.match(/not found:\s*(.+)/i);
-    if (notFoundMatch) {
+  let remaining = keys;
+  let bibtex = "";
+
+  // 循环替代递归：BBT 每次报告所有 not found 键，最多迭代 2 次
+  while (remaining.length > 0) {
+    try {
+      const result = await postJsonRpc("item.export", [remaining, latexBibStyle]);
+      bibtex += String(result || "");
+      break;
+    } catch (error) {
+      // BBT 在部分键找不到时返回 "not found: key1, key2" 错误
+      const message = error instanceof Error ? error.message : String(error);
+      const notFoundMatch = message.match(/not found:\s*(.+)/i);
+      if (!notFoundMatch) {
+        throw error;
+      }
       const notFoundKeys = notFoundMatch[1]
         .split(",")
         .map((k) => k.trim())
         .filter(Boolean);
       missingKeys.push(...notFoundKeys);
-      const foundKeys = keys.filter((k) => !notFoundKeys.includes(k));
-      if (foundKeys.length === 0) {
-        return { bibtex: "", missingKeys }; // 全部找不到，返回空
-      }
-      // 递归导出能找到的键，并合并缺失键
-      const rest = await exportBibtex(foundKeys);
-      return { bibtex: rest.bibtex, missingKeys: [...missingKeys, ...rest.missingKeys] };
+      const notFoundSet = new Set(notFoundKeys);
+      remaining = remaining.filter((k) => !notFoundSet.has(k));
     }
-    throw error;
   }
+  return { bibtex, missingKeys };
 }
 
 /**
@@ -93,7 +98,8 @@ export async function exportBibtex(keys: string[]): Promise<ExportResult> {
  */
 export async function getBibtexFromZotero(citeKey: string): Promise<string | null> {
   try {
-    const result = await postJsonRpc("item.export", [[citeKey], "bibtex"]);
+    const { latexBibStyle } = getConfig();
+    const result = await postJsonRpc("item.export", [[citeKey], latexBibStyle]);
     return result ? String(result) : null;
   } catch (error) {
     // 未找到或不可达的条目由调用方处理

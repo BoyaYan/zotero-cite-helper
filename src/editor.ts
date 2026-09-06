@@ -27,8 +27,8 @@ export function getDocumentCiteKeys(editor: vscode.TextEditor): string[] {
     keys.push(m[1].trim());
   }
 
-  // Markdown pandoc: @key
-  const pandocRegex = /@([A-Za-z0-9_:\-\.]+)/g;
+  // Markdown pandoc: @key（排除 email 地址中的 @，要求 @ 前不是字母数字）
+  const pandocRegex = /(?<![A-Za-z0-9_])@([A-Za-z0-9_:\-\.]+)/g;
   while ((m = pandocRegex.exec(text)) !== null) {
     keys.push(m[1].trim());
   }

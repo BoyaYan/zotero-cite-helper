@@ -12,16 +12,44 @@ export interface BibEntry {
 
 /**
  * 解析 BibTeX 文件，返回所有条目。
+ * 自动处理文件末尾无换行符的情况。
  */
 export function parseBibtex(text: string): BibEntry[] {
   const entries: BibEntry[] = [];
+  // 末尾补换行，确保最后一个条目（无结尾换行）也能匹配 \n}
+  const normalized = text.endsWith("\n") ? text : text + "\n";
   const regex = /@(\w+)\s*\{([^,]+),([\s\S]*?)\n\}/g;
   let m: RegExpExecArray | null;
-  while ((m = regex.exec(text)) !== null) {
+  while ((m = regex.exec(normalized)) !== null) {
     const citationKey = m[2].trim();
     entries.push({ citationKey, raw: m[0] });
   }
   return entries;
+}
+
+/**
+ * 按引用键替换 .bib 文本中的条目，保留注释、@comment、@string、@preamble 等非条目内容。
+ * @param text 原始 .bib 文本
+ * @param replacements 引用键 -> 新条目文本 的映射
+ * @returns 替换后的完整文本
+ */
+export function replaceBibEntries(text: string, replacements: Map<string, string>): string {
+  const normalized = text.endsWith("\n") ? text : text + "\n";
+  const regex = /@(\w+)\s*\{([^,]+),([\s\S]*?)\n\}/g;
+  let result = "";
+  let lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = regex.exec(normalized)) !== null) {
+    // 保留条目之前的非条目内容（注释、@comment、@string、@preamble 等）
+    result += normalized.slice(lastIndex, m.index);
+    const key = m[2].trim();
+    const replacement = replacements.get(key);
+    result += replacement !== undefined ? replacement : m[0];
+    lastIndex = regex.lastIndex;
+  }
+  // 保留末尾内容
+  result += normalized.slice(lastIndex);
+  return result;
 }
 
 /**

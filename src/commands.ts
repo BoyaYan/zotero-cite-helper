@@ -1,14 +1,14 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import { getActiveEditor, getDocumentCiteKeys } from "./editor";
-import { exportBibtex, getBibtexFromZotero, getConfig, pickCiteKeys } from "./zotero";
+import { exportBibtex, getConfig, pickCiteKeys } from "./zotero";
 import { hideStatusBarItem, showStatusBarItem } from "./statusBar";
 import {
+  parseBibtex,
   readBibEntriesFromFile,
-  writeBibEntries,
   appendBibliographyEntries,
   resolveBibPath,
-  toBibtex,
+  replaceBibEntries,
 } from "./bibtexStore";
 
 /**
@@ -37,6 +37,10 @@ export async function exportBibLatex(): Promise<void> {
     }
 
     const bibPath = vscode.Uri.joinPath(currentFileUri, "..", bibName);
+    if (!bibName.trim()) {
+      vscode.window.showErrorMessage("文件名不能为空。");
+      return;
+    }
     const keys = getDocumentCiteKeys(editor);
     const uniqueKeys = Array.from(new Set(keys));
     if (uniqueKeys.length === 0) {
@@ -83,17 +87,8 @@ export async function citeBibliography(): Promise<void> {
       return;
     }
 
-    // 插入引用
-    insertCiteKeys(citeKeys, editor);
-
-    // 更新 .bib 文件
-    const bibKeys = await getBibliographyKeyFromFile(bibPath);
-    const uniqueKeys = citeKeys.filter((key) => !bibKeys.includes(key));
-    if (uniqueKeys.length === 0) {
-      return;
-    }
-
-    const { bibtex: newEntries, missingKeys } = await exportBibtex(uniqueKeys);
+    // 先导出 BibTeX 条目，成功后再插入引用，避免 Zotero 连接失败时引用残留
+    const { bibtex: newEntries, missingKeys } = await exportBibtex(citeKeys);
     if (!newEntries.trim()) {
       vscode.window.showInformationMessage("所选引用键在 Zotero 中均未找到，未更新参考文献文件。");
       return;
@@ -106,13 +101,17 @@ export async function citeBibliography(): Promise<void> {
       );
       return;
     }
+
+    // 导出和写入成功后再插入引用
+    insertCiteKeys(citeKeys, editor);
+
     if (missingKeys.length > 0) {
       vscode.window.showWarningMessage(
-        `参考文献已更新：向 ${path.basename(bibPath.fsPath)} 追加了 ${uniqueKeys.length} 条新记录，但有 ${missingKeys.length} 个条目在 Zotero 中未找到：${missingKeys.join(", ")}`
+        `参考文献已更新：向 ${path.basename(bibPath.fsPath)} 追加了 ${citeKeys.length} 条新记录，但有 ${missingKeys.length} 个条目在 Zotero 中未找到：${missingKeys.join(", ")}`
       );
     } else {
       vscode.window.showInformationMessage(
-        `参考文献已更新：向 ${path.basename(bibPath.fsPath)} 追加了 ${uniqueKeys.length} 条新记录。`
+        `参考文献已更新：向 ${path.basename(bibPath.fsPath)} 追加了 ${citeKeys.length} 条新记录。`
       );
     }
   } catch (error) {
@@ -141,39 +140,32 @@ export async function updateBibEntries(): Promise<void> {
       bibPath = resolveBibPath(editor.document.uri, defaultBibName);
     }
 
-    const parsedData = await readBibEntriesFromFile(bibPath);
+    // 读取整个文件文本（保留注释、@comment、@string、@preamble 等非条目内容）
+    const fileBytes = await vscode.workspace.fs.readFile(bibPath);
+    const fileText = Buffer.from(fileBytes).toString("utf-8");
+    const parsedData = parseBibtex(fileText);
     const total = parsedData.length;
-    let processedCount = 0;
-    let updated = false;
-    const missingKeys: string[] = [];
-    const serializedEntries: string[] = [];
+    if (total === 0) {
+      vscode.window.showInformationMessage("未在 .bib 文件中检测到任何条目。");
+      return;
+    }
 
-    // 用进度通知包裹耗时循环，用户可看到更新进度
-    await vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: "正在从 Zotero 更新 BibTeX 条目...",
-        cancellable: false,
-      },
-      async (progress) => {
-        for (const entry of parsedData) {
-          const citeKey = entry.citationKey;
-          const result = await getBibtexFromZotero(citeKey);
-          if (result === null) {
-            missingKeys.push(citeKey);
-            serializedEntries.push(toBibtex(entry));
-            continue;
-          }
-          processedCount += 1;
-          updated = true;
-          serializedEntries.push(result);
-          progress.report({ message: `已处理 ${processedCount}/${total}` });
-        }
-      }
-    );
+    const allKeys = parsedData.map((e) => e.citationKey);
 
-    if (updated) {
-      await writeBibEntries(bibPath, serializedEntries);
+    // 批量导出（1-2 次请求替代逐条 N 次请求）
+    const { bibtex, missingKeys } = await exportBibtex(allKeys);
+
+    // 解析导出的条目，建立 引用键 -> 新条目文本 映射
+    const replacements = new Map<string, string>();
+    for (const entry of parseBibtex(bibtex)) {
+      replacements.set(entry.citationKey, entry.raw);
+    }
+
+    const updatedCount = replacements.size;
+    if (updatedCount > 0) {
+      // 按引用键替换条目，保留注释等非条目内容
+      const newText = replaceBibEntries(fileText, replacements);
+      await vscode.workspace.fs.writeFile(bibPath, Buffer.from(newText, "utf-8"));
     }
 
     if (missingKeys.length > 0) {
@@ -182,7 +174,7 @@ export async function updateBibEntries(): Promise<void> {
       );
     }
 
-    vscode.window.showInformationMessage(`已成功更新 ${processedCount}/${total} 条 bib 记录。`);
+    vscode.window.showInformationMessage(`已成功更新 ${updatedCount}/${total} 条 bib 记录。`);
   } catch (error) {
     vscode.window.showErrorMessage(
       `更新 BibTeX 文件失败：${error instanceof Error ? error.message : String(error)}`
