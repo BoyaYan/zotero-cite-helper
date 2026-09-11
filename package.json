@@ -2,7 +2,7 @@
   "name": "zotero-cite-helper",
   "displayName": "Zotero Cite Helper",
   "description": "基于 Zotero Better BibTeX JSON-RPC 的引用工具：导出 BibLaTeX、引用并更新文献、更新 BibTeX 条目。",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "boyayan",
   "repository": {
     "type": "git",
@@ -57,7 +57,10 @@
         },
         "zotero-cite-helper.latexBibStyle": {
           "type": "string",
-          "enum": ["bibtex", "biblatex"],
+          "enum": [
+            "bibtex",
+            "biblatex"
+          ],
           "default": "bibtex",
           "description": "导出的 LaTeX 引用格式"
         }
